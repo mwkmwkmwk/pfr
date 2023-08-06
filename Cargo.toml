@@ -1,0 +1,9 @@
+[package]
+name = "pfr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrayref = "0.3.7"
+clap = { version = "4.3.19", features = ["derive"] }
+cpal = "0.15"
