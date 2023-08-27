@@ -1,3 +1,4 @@
+use arrayref::array_ref;
 use std::path::Path;
 
 use ndarray::{concatenate, prelude::*};
@@ -15,6 +16,45 @@ pub struct Assets {
     pub spring: Image,
     pub ball: Image,
     pub physmaps: [Array2<u8>; 2],
+    pub pal_patches: Vec<PalPatch>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PalPatch {
+    pub base_index: u8,
+    pub colors: Vec<(u8, u8, u8)>,
+}
+
+fn extract_pal_patches(exe: &MzExe, table: TableId) -> Vec<PalPatch> {
+    let mut off = match table {
+        TableId::Table1 => 0x1079,
+        TableId::Table2 => 0xdd3,
+        TableId::Table3 => 0xc0a,
+        TableId::Table4 => 0xfda,
+    };
+
+    let mut res = vec![];
+    while exe.data_byte(off) != 0 {
+        let base_index = exe.data_byte(off);
+        let c = exe.data_byte(off + 1) as u16;
+
+        let mut colors = vec![];
+
+        off += 2;
+
+        for i in 0..c {
+            colors.push((
+                exe.data_byte(off + i * 3),
+                exe.data_byte(off + i * 3 + 1),
+                exe.data_byte(off + i * 3 + 2),
+            ))
+        }
+
+        off += c * 3;
+
+        res.push(PalPatch { base_index, colors });
+    }
+    res
 }
 
 fn extract_main_board(exe: &MzExe, table: TableId) -> Image {
@@ -215,6 +255,7 @@ impl Assets {
         let ds = exe.code_word(exe.ip + 0xf);
         exe.ds = ds;
 
+        let pal_patches = extract_pal_patches(&exe, table);
         let main_board = extract_main_board(&exe, table);
         let occmaps = extract_occmaps(&exe, table);
         let spring = Image {
@@ -226,7 +267,8 @@ impl Assets {
             cmap: main_board.cmap.clone(),
         };
 
-        let physmaps = extract_physmaps(&exe, table);
+        // let physmaps = extract_physmaps(&exe, table);
+        let physmaps = extract_occmaps(&exe, table);
 
         Ok(Assets {
             table,
@@ -236,6 +278,7 @@ impl Assets {
             spring,
             ball,
             physmaps,
+            pal_patches,
         })
     }
 }

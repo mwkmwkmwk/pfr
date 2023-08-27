@@ -53,7 +53,16 @@ fn main() -> std::io::Result<()> {
     };
     let assets = Assets::load(args.input_dir.join(file), table)?;
     println!("DS: {ds:04x}", ds = assets.exe.ds);
-    save_png(&assets.main_board, &args.output_dir, "main.png")?;
+    let mut main_board = assets.main_board.clone();
+
+    for patch in &assets.pal_patches {
+        for (i, &color) in patch.colors.iter().enumerate() {
+            main_board.cmap[patch.base_index as usize + i] = color
+        }
+    }
+
+    save_png(&main_board, &args.output_dir, "main.png")?;
+
     save_png(
         &Image {
             data: assets.occmaps[0].clone(),
