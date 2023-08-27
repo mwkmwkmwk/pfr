@@ -54,6 +54,66 @@ fn main() -> std::io::Result<()> {
     let assets = Assets::load(args.input_dir.join(file), table)?;
     println!("DS: {ds:04x}", ds = assets.exe.ds);
     save_png(&assets.main_board, &args.output_dir, "main.png")?;
+    save_png(
+        &Image {
+            data: assets.occmaps[0].clone(),
+            cmap: vec![(0, 0, 0), (255, 255, 255)],
+        },
+        &args.output_dir,
+        "occmap0.png",
+    )?;
+    save_png(
+        &Image {
+            data: assets.occmaps[1].clone(),
+            cmap: vec![(0, 0, 0), (255, 255, 255)],
+        },
+        &args.output_dir,
+        "occmap1.png",
+    )?;
     save_png(&assets.spring, &args.output_dir, "spring.png")?;
+    save_png(&assets.ball, &args.output_dir, "ball.png")?;
+    let physmap_pal = vec![
+        (0, 0, 0),
+        (0, 0, 64),
+        (0, 64, 0),
+        (64, 0, 0),
+        (64, 64, 0),
+        (64, 0, 64),
+        (0, 64, 64),
+        (64, 64, 64),
+        (64, 0, 32),
+        (64, 32, 0),
+        (0, 64, 32),
+        (32, 64, 0),
+        (0, 32, 64),
+        (32, 0, 64),
+        (32, 32, 0),
+        (0, 32, 32),
+        (128, 128, 128),
+        (128, 128, 255),
+        (128, 255, 128),
+        (128, 255, 255),
+        (255, 128, 128),
+        (255, 128, 255),
+        (255, 255, 128),
+        (255, 255, 255),
+    ];
+    save_png(
+        &Image {
+            data: assets.physmaps[0].clone(),
+            cmap: physmap_pal.clone(),
+        },
+        &args.output_dir,
+        "physmap0.png",
+    )?;
+    save_png(
+        &Image {
+            data: assets.physmaps[1].clone(),
+            cmap: physmap_pal.clone(),
+        },
+        &args.output_dir,
+        "physmap1.png",
+    )?;
+
     Ok(())
 }
