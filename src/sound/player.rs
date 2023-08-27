@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use cpal::{
-    traits::{DeviceTrait, HostTrait},
+    traits::{DeviceTrait, HostTrait, StreamTrait},
     BufferSize, SampleRate, Stream, StreamConfig,
 };
 
@@ -67,7 +67,7 @@ struct ChannelState {
 
 struct PlayerControl {
     cmd: AtomicU32,
-    status: AtomicU32,
+    ticks: AtomicU32,
     sfx: AtomicU32,
     state: AtomicU32,
 }
@@ -75,8 +75,8 @@ struct PlayerControl {
 impl PlayerControl {
     const CMD_JUMP_POSITION: u32 = 0x7f;
     const CMD_JUMP_VALID: u32 = 0x80;
-    const STATE_PAUSED: u32 = 0x100;
-    const STATE_MASTER_VOLUME: u32 = 0xff;
+    const STATE_PAUSED: u32 = 0x200;
+    const STATE_MASTER_VOLUME: u32 = 0x1ff;
 }
 
 pub struct Player {
@@ -145,6 +145,15 @@ impl Player {
             (period as u32) | (sample as u32) << 8 | (volume as u32) << 16 | (channel as u32) << 24;
         self.control.sfx.store(val, Ordering::Relaxed);
     }
+
+    pub fn get_ticks(&self) -> u32 {
+        self.control.ticks.load(Ordering::Acquire)
+    }
+
+    pub fn set_master_volume(&self, volume: u32) {
+        assert!(volume <= 0x100);
+        self.control.state.store(volume, Ordering::Relaxed);
+    }
 }
 
 pub fn play(module: Mod, start: bool) -> Player {
@@ -152,12 +161,18 @@ pub fn play(module: Mod, start: bool) -> Player {
     let device = host
         .default_output_device()
         .expect("no output device available");
-    let sample_rate = 44000;
+    /*let supported_configs_range = device
+        .supported_output_configs()
+        .expect("error while querying configs");
+    for cfg in supported_configs_range {
+        println!("{cfg:#?}");
+    }*/
+    let sample_rate = 48000;
     let control = Arc::new(PlayerControl {
         cmd: AtomicU32::new(0),
-        status: AtomicU32::new(0),
+        ticks: AtomicU32::new(0),
         sfx: AtomicU32::new(0),
-        state: AtomicU32::new(100),
+        state: AtomicU32::new(0x100),
     });
     let mut state = PlayerState {
         module,
@@ -201,11 +216,12 @@ pub fn play(module: Mod, start: bool) -> Player {
     let stream = device
         .build_output_stream(
             &config,
-            move |data: &mut [i32], _: &cpal::OutputCallbackInfo| state.make_samples(data),
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| state.make_samples(data),
             move |err| eprintln!("audio error: {err:?}"),
             None, // None=blocking, Some(Duration)=timeout
         )
         .expect("failed to make stream");
+    stream.play().unwrap();
     Player {
         _stream: stream,
         control,
@@ -213,11 +229,11 @@ pub fn play(module: Mod, start: bool) -> Player {
 }
 
 impl PlayerState {
-    fn make_samples(&mut self, data: &mut [i32]) {
+    fn make_samples(&mut self, data: &mut [f32]) {
         let state = self.control.state.load(Ordering::Relaxed);
         if (state & PlayerControl::STATE_PAUSED) != 0 {
             for v in data {
-                *v = 0;
+                *v = 0.0;
             }
             return;
         }
@@ -225,7 +241,7 @@ impl PlayerState {
         self.process_cmd();
         if !self.started {
             for v in data {
-                *v = 0;
+                *v = 0.0;
             }
             return;
         }
@@ -246,7 +262,6 @@ impl PlayerState {
             };
             self.play_note(channel, note);
         }
-        // XXX process sfx
         let mut pos = 0;
         while pos < data.len() {
             if self.samples_left == 0 {
@@ -258,9 +273,15 @@ impl PlayerState {
                     self.play_effects();
                 }
                 self.samples_left = self.samples_in_tick;
+                let ticks = self.control.ticks.load(Ordering::Relaxed);
+                self.control.ticks.store(ticks + 1, Ordering::Release);
             }
-            data[pos] = (self.play_channel(0) + self.play_channel(1)) / 100 * master_volume;
-            data[pos + 1] = (self.play_channel(2) + self.play_channel(3)) / 100 * master_volume;
+            data[pos] = ((self.play_channel(0) + self.play_channel(1)) / 0x100 * master_volume)
+                as f32
+                / (0x80000000u32 as f32);
+            data[pos + 1] = ((self.play_channel(2) + self.play_channel(3)) / 0x100 * master_volume)
+                as f32
+                / (0x80000000u32 as f32);
             pos += 2;
             self.samples_left -= 1;
         }
@@ -348,8 +369,6 @@ impl PlayerState {
             self.play_note(i, note);
             print!("   {note}");
         }
-        let status = self.row | self.position << 6;
-        self.control.status.store(status as u32, Ordering::Relaxed);
         println!();
         if let Some(pos) = self.jump {
             println!("---JUMP---");
